@@ -7,7 +7,7 @@ import threading
 import pyttsx3
 import subprocess
 from collections import defaultdict
-import language_conversion  
+import language_conversion
 
 class MultiLangOCRSystem:
     def __init__(self):
@@ -16,9 +16,11 @@ class MultiLangOCRSystem:
         if not self.cap.isOpened():
             print("Error: Unable to access the webcam.")
             exit()
-        
+
         self.cap.set(cv2.CAP_PROP_FRAME_WIDTH, 1280)
         self.cap.set(cv2.CAP_PROP_FRAME_HEIGHT, 720)
+        self.cap.set(cv2.CAP_PROP_FPS,20)
+        self.speaking=False
 
         # Initialize TTS engine
         self.engine = pyttsx3.init()
@@ -26,8 +28,8 @@ class MultiLangOCRSystem:
         self.tts_lock = threading.Lock()
 
         # Initialize OCR reader with multiple languages
-        self.reader = easyocr.Reader(lang_list=["te", "en"], gpu=False)
-        
+        self.reader = easyocr.Reader(lang_list=["kn", "en"], gpu=False)
+
         # Define script Unicode ranges
         self.script_ranges = {
             'ta': (0x0B80, 0x0BFF),
@@ -61,7 +63,7 @@ class MultiLangOCRSystem:
                 if start <= code <= end:
                     script_counts[lang] += 1
                     break
-        
+
         return max(script_counts, key=script_counts.get, default='en')
 
     def process_text(self, text):
@@ -69,6 +71,7 @@ class MultiLangOCRSystem:
         return re.sub(r'[^\w\s\-.,!?]', '', text).strip()
 
     def speak_text(self, text):
+        self.speaking=True
         """Convert text to speech"""
         with self.tts_lock:  # Ensure only one speech thread at a time
             lang = self.detect_script(text)
@@ -80,6 +83,7 @@ class MultiLangOCRSystem:
                 print(spoken_text)
             self.engine.say(spoken_text)
             self.engine.runAndWait()
+            self.speaking=False
 
     def process_frame(self, frame):
         """Main OCR processing function"""
@@ -95,7 +99,8 @@ class MultiLangOCRSystem:
             processed_img,
             text_threshold=0.6,
             width_ths=0.7,
-            add_margin=0.1
+            add_margin=0.1,
+            contrast_ths=0.5
         )
 
         # Debugging: Print raw OCR results
@@ -114,29 +119,31 @@ class MultiLangOCRSystem:
         return results
 
     def run(self):
-        """Main capture loop"""
-        while True:
-            ret, frame = self.cap.read()
-            if not ret:
-                print("Error: Unable to capture frame.")
-                break
+        if not self.speaking:
+            """Main capture loop"""
+            while True:
+                time.sleep(0.3)
+                ret, frame = self.cap.read()
+                if not ret:
+                    print("Error: Unable to capture frame.")
+                    break
 
-            # Process frame
-            results = self.process_frame(frame)
+                # Process frame
+                results = self.process_frame(frame)
 
-            if results:
-                for (bbox, text, _) in results:
-                    points = np.array(bbox).astype(np.int32)
-                    cv2.polylines(frame, [points], True, (0, 255, 0), 2)
-                    cv2.putText(frame, text, tuple(points[0]), 
-                               cv2.FONT_HERSHEY_SIMPLEX, 0.7, (255, 0, 0), 2)
+                if results:
+                    for (bbox, text, _) in results:
+                        points = np.array(bbox).astype(np.int32)
+                        cv2.polylines(frame, [points], True, (0, 255, 0), 2)
+                        cv2.putText(frame, text, tuple(points[0]),
+                                   cv2.FONT_HERSHEY_SIMPLEX, 0.7, (255, 0, 0), 2)
 
-            cv2.imshow('OCR System', frame)
-            if cv2.waitKey(1) & 0xFF == ord('q'):
-                break
+                cv2.imshow('OCR System', frame)
+                if cv2.waitKey(1) & 0xFF == ord('q'):
+                    break
 
-        self.cap.release()
-        cv2.destroyAllWindows()
+            self.cap.release()
+            cv2.destroyAllWindows()
 
 if __name__ == "__main__":
     ocr = MultiLangOCRSystem()
